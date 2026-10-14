@@ -7,7 +7,6 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #141215;
       --card: #1c1a1e;
       --text: #f2f0f3;
       --muted: #8f8896;
@@ -17,35 +16,31 @@
       --err: #ff7a9c;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
     body {
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: var(--bg);
+      gap: 12px;
+      background: var(--card);
       color: var(--text);
       font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
-      user-select: none;
-    }
-    .card {
-      width: min(340px, calc(100vw - 32px));
-      background: var(--card);
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 14px 16px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      user-select: none;
+      cursor: default;
     }
     .hidden { display: none !important; }
     .logo {
-      display: block;
       width: 44px; height: 44px;
-      margin: 0 auto 12px;
       border-radius: 10px;
+      pointer-events: none;
     }
+    .panel { width: 100%; padding: 0 22px; }
     .row { display: flex; align-items: center; gap: 12px; }
     .spinner {
       flex: none;
-      width: 20px; height: 20px;
+      width: 18px; height: 18px;
       border-radius: 50%;
       border: 2px solid var(--line);
       border-top-color: var(--accent);
@@ -54,43 +49,40 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .dot {
       flex: none;
-      width: 10px; height: 10px;
-      margin: 0 5px;
+      width: 9px; height: 9px;
+      margin: 0 4px;
       border-radius: 50%;
       background: var(--err);
     }
     .title { font-size: 14px; font-weight: 700; }
     .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
-    .actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .actions { display: flex; justify-content: center; margin-top: 10px; }
     .btn {
       background: var(--accent); color: #fff; border: 0;
-      padding: 7px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+      padding: 7px 16px; border-radius: 8px; font-size: 13px; cursor: pointer;
     }
     .btn:hover:not(:disabled) { background: var(--accent-hover); }
     .btn:disabled { opacity: 0.5; cursor: default; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <img class="logo" src="logo.png" alt="Topluyo" onerror="this.remove()" />
-    <div id="loading" class="row">
-      <div class="spinner"></div>
-      <div>
-        <div class="title">Bağlanıyor…</div>
+  <img class="logo" src="logo.png" alt="Topluyo" onerror="this.remove()" />
+
+  <div id="loading" class="panel row" style="justify-content:center">
+    <div class="spinner"></div>
+    <div class="title">Bağlanıyor…</div>
+  </div>
+
+  <div id="offline" class="panel hidden">
+    <div class="row" style="justify-content:center">
+      <div class="dot"></div>
+      <div style="text-align:center">
+        <div class="title">Bağlantın yok</div>
+        <div class="sub" id="status"></div>
       </div>
     </div>
-
-    <div id="offline" class="hidden">
-      <div class="row">
-        <div class="dot"></div>
-        <div>
-          <div class="title">Bağlantın yok</div>
-          <div class="sub" id="status"></div>
-        </div>
-      </div>
-      <div class="actions">
-        <button id="retry" class="btn">Şimdi dene</button>
-      </div>
+    <div class="actions">
+      <button id="retry" class="btn">Şimdi dene</button>
     </div>
   </div>
 
@@ -143,7 +135,7 @@
       busy = true;
       stopTicker();
 
-      // Pencere zaten çevrimdışı görünümdeyse aynı kartta "deneniyor" yazısı göster
+      // Kart zaten çevrimdışı görünümdeyse aynı kartta "deneniyor" yazısı göster
       if (!offline.classList.contains('hidden')) {
         status.textContent = 'Deneniyor…';
         retryBtn.disabled = true;
@@ -154,7 +146,8 @@
       try {
         await fetch(SITE, { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal });
         clearTimeout(timer);
-        location.replace(SITE);
+        // Bağlantı var: asıl pencereyi aç, bu küçük pencereyi kapat (Rust tarafı yapar)
+        await window.__TAURI__.core.invoke('site_connected');
       } catch (e) {
         clearTimeout(timer);
         busy = false;
@@ -162,6 +155,13 @@
         waitThenRetry();
       }
     }
+
+    // Çerçevesiz pencere: boş alana basılınca pencere sürüklenir
+    document.addEventListener('mousedown', (e) => {
+      if (e.button === 0 && !e.target.closest('button')) {
+        window.__TAURI__.window.getCurrentWindow().startDragging();
+      }
+    });
 
     retryBtn.addEventListener('click', tryOpen);
     window.addEventListener('online', tryOpen);

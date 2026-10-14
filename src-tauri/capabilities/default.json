@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Ayarlar ve güncelleme pencereleri",
-  "windows": ["settings", "update"],
-  "permissions": ["core:default"]
+  "description": "Yerel pencerelerin yetkileri (siteye IPC verilmez)",
+  "windows": ["settings", "update", "connect"],
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
 }

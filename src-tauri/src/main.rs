@@ -15,6 +15,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 const SITE_HOST: &str = "topluyo.com";
+const SITE_URL: &str = "https://topluyo.com/";
 
 // Giriş sayfaları uygulama içinde açılır (Google girişi için). Diğer dış linkler tarayıcıda açılır.
 const AUTH_HOSTS: &[&str] = &[
@@ -358,7 +359,39 @@ fn show_main(app: &AppHandle) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+    } else if let Some(w) = app.get_webview_window("connect") {
+        let _ = w.show();
+        let _ = w.set_focus();
     }
+}
+
+// Açılışta bağlantı kontrolü yapan küçük, çerçevesiz pencere.
+// Bağlantı olunca site_connected komutu asıl pencereyi açar ve bu pencereyi kapatır.
+fn open_connect_window(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(w) = app.get_webview_window("connect") {
+        w.show()?;
+        w.set_focus()?;
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(app, "connect", WebviewUrl::App("loader.html".into()))
+        .title("Topluyo")
+        .inner_size(340.0, 200.0)
+        .resizable(false)
+        .decorations(false)
+        .center()
+        .build()?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn site_connected(app: AppHandle) -> Result<(), String> {
+    if app.get_webview_window("main").is_none() {
+        create_main_window(&app).map_err(|e| e.to_string())?;
+    }
+    if let Some(w) = app.get_webview_window("connect") {
+        let _ = w.close();
+    }
+    Ok(())
 }
 
 fn open_settings(app: &AppHandle) -> tauri::Result<()> {
@@ -451,7 +484,8 @@ fn handle_action(app: &AppHandle, action: &str) {
 fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     let nav_app = app.clone();
     let new_app = app.clone();
-    WebviewWindowBuilder::new(app, "main", WebviewUrl::App("loader.html".into()))
+    let site: Url = SITE_URL.parse().expect("geçersiz site adresi");
+    WebviewWindowBuilder::new(app, "main", WebviewUrl::External(site))
         .title("Topluyo")
         .inner_size(1280.0, 800.0)
         .min_inner_size(800.0, 600.0)
@@ -596,7 +630,11 @@ async fn update_loop(app: AppHandle) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&["connect"])
+                .build(),
+        )
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -609,6 +647,7 @@ fn main() {
             install_update,
             postpone_update,
             close_current_window,
+            site_connected,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -618,7 +657,7 @@ fn main() {
                 pending_update: Mutex::new(None),
                 postponed: Mutex::new(false),
             });
-            create_main_window(&handle)?;
+            open_connect_window(&handle)?;
             build_tray(app)?;
             tauri::async_runtime::spawn(update_loop(handle));
             Ok(())
