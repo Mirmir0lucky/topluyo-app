@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 use tauri::menu::MenuItem;
@@ -375,12 +376,29 @@ fn open_connect_window(app: &AppHandle) -> tauri::Result<()> {
     }
     WebviewWindowBuilder::new(app, "connect", WebviewUrl::App("loader.html".into()))
         .title("Topluyo")
-        .inner_size(340.0, 200.0)
+        .inner_size(340.0, 240.0)
         .resizable(false)
         .decorations(false)
         .center()
         .build()?;
     Ok(())
+}
+
+// Siteye ulaşılabiliyor mu? Webview ağını ve CORS'u kullanmadan, doğrudan TCP ile 443 portuna bakar.
+fn site_reachable() -> bool {
+    let Ok(addrs) = ("topluyo.com", 443).to_socket_addrs() else {
+        return false;
+    };
+    addrs
+        .into_iter()
+        .any(|addr| TcpStream::connect_timeout(&addr, Duration::from_secs(6)).is_ok())
+}
+
+#[tauri::command]
+async fn check_site() -> bool {
+    tauri::async_runtime::spawn_blocking(site_reachable)
+        .await
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -648,6 +666,7 @@ fn main() {
             postpone_update,
             close_current_window,
             site_connected,
+            check_site,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
