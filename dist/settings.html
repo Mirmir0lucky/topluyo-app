@@ -78,6 +78,16 @@
         <span class="slider"></span>
       </label>
     </div>
+    <div class="row">
+      <div>
+        <div class="label">Başlık çubuğunu siteyle eşleştir</div>
+        <div class="hint">Pencere başlığı Topluyo'nun koyu renklerinde görünür. Yalnızca Windows.</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="title_bar_match" />
+        <span class="slider"></span>
+      </label>
+    </div>
   </div>
 
   <div class="group">Başlangıç</div>
@@ -112,13 +122,24 @@
     </div>
   </div>
 
+  <div class="group">Veri</div>
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="label">Oturumu ve önbelleği temizle</div>
+        <div class="hint">Giriş ya da site oturumu takılırsa kullan. Topluyo yeniden başlar.</div>
+      </div>
+      <button class="btn" id="clear">Temizle</button>
+    </div>
+  </div>
+
   <div class="status" id="status"></div>
   <div class="version" id="version"></div>
 
   <script>
     document.addEventListener('contextmenu', (e) => e.preventDefault());
     const { invoke } = window.__TAURI__.core;
-    const TOGGLES = ['close_to_tray', 'start_on_login', 'auto_update_check'];
+    const TOGGLES = ['close_to_tray', 'start_on_login', 'auto_update_check', 'title_bar_match'];
     const statusEl = document.getElementById('status');
     const RESULTS = {
       'available': 'Yeni sürüm bulundu, pencere açıldı',
@@ -150,6 +171,15 @@
         el.checked = settings[id];
         el.addEventListener('change', save);
       }
+
+      document.getElementById('clear').addEventListener('click', async () => {
+        if (!confirm('Oturum ve önbellek silinecek, Topluyo yeniden başlayacak. Devam edilsin mi?')) return;
+        try {
+          await invoke('clear_site_data');
+        } catch (err) {
+          setStatus('Temizlenemedi: ' + err);
+        }
+      });
 
       document.getElementById('version').textContent = 'Sürüm ' + await invoke('app_version');
 

@@ -77,7 +77,7 @@
     <div class="row" style="justify-content:center">
       <div class="dot"></div>
       <div style="text-align:center">
-        <div class="title">Bağlantın yok</div>
+        <div class="title" id="title">Bağlantın yok</div>
         <div class="sub" id="status"></div>
       </div>
     </div>
@@ -93,6 +93,7 @@
     const loading = document.getElementById('loading');
     const offline = document.getElementById('offline');
     const status = document.getElementById('status');
+    const titleEl = document.getElementById('title');
     const retryBtn = document.getElementById('retry');
 
     let ticker = null;
@@ -141,9 +142,10 @@
       }
 
       // Kontrol Rust tarafında yapılır (TCP 443). Webview ağına ve CORS'a takılmaz.
+      let result = 'offline';
       try {
-        const ok = await window.__TAURI__.core.invoke('check_site');
-        if (ok) {
+        result = await window.__TAURI__.core.invoke('check_site');
+        if (result === 'ok') {
           // Bağlantı var: asıl pencereyi aç, bu küçük pencereyi kapat (Rust tarafı yapar)
           await window.__TAURI__.core.invoke('site_connected');
           return;
@@ -151,6 +153,7 @@
       } catch (e) {
         // Komut hata verirse çevrimdışı say
       }
+      titleEl.textContent = result === 'server' ? 'Topluyo şu an yanıt vermiyor' : 'Bağlantın yok';
       busy = false;
       showOffline();
       waitThenRetry();

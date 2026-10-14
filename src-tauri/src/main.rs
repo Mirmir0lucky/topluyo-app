@@ -3,7 +3,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 use tauri::menu::MenuItem;
@@ -283,6 +282,7 @@ struct Settings {
     close_to_tray: bool,
     start_on_login: bool,
     auto_update_check: bool,
+    title_bar_match: bool,
 }
 
 impl Default for Settings {
@@ -291,6 +291,7 @@ impl Default for Settings {
             close_to_tray: true,
             start_on_login: false,
             auto_update_check: true,
+            title_bar_match: true,
         }
     }
 }
@@ -300,6 +301,112 @@ struct AppState {
     pending_update: Mutex<Option<Update>>,
     postponed: Mutex<bool>,
     link: Mutex<String>,
+}
+
+// ---------- Başlık çubuğu rengi (yalnızca Windows, DWM) ----------
+
+#[cfg(windows)]
+mod titlebar {
+    use std::ffi::c_void;
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(hwnd: *mut c_void, attr: u32, value: *const c_void, size: u32) -> i32;
+    }
+
+    const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+    const DWMWA_CAPTION_COLOR: u32 = 35; // Windows 11
+    const DWMWA_TEXT_COLOR: u32 = 36; // Windows 11
+    const DWMWA_COLOR_DEFAULT: u32 = 0xFFFF_FFFF;
+
+    fn set<T>(hwnd: *mut c_void, attr: u32, value: T) {
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                attr,
+                &value as *const T as *const c_void,
+                std::mem::size_of::<T>() as u32,
+            );
+        }
+    }
+
+    pub fn apply(window: &tauri::WebviewWindow, enabled: bool) {
+        let Ok(hwnd) = window.hwnd() else {
+            return;
+        };
+        let h = hwnd.0;
+        set::<i32>(h, DWMWA_USE_IMMERSIVE_DARK_MODE, 1);
+        if enabled {
+            // COLORREF biçimi: 0x00BBGGRR. #141215 ve #f2f0f3
+            set::<u32>(h, DWMWA_CAPTION_COLOR, 0x0015_1214);
+            set::<u32>(h, DWMWA_TEXT_COLOR, 0x00F3_F0F2);
+        } else {
+            set::<u32>(h, DWMWA_CAPTION_COLOR, DWMWA_COLOR_DEFAULT);
+            set::<u32>(h, DWMWA_TEXT_COLOR, DWMWA_COLOR_DEFAULT);
+        }
+    }
+}
+
+fn apply_titlebar(window: &tauri::WebviewWindow, enabled: bool) {
+    #[cfg(windows)]
+    titlebar::apply(window, enabled);
+    #[cfg(not(windows))]
+    {
+        let _ = (window, enabled);
+    }
+}
+
+// ---------- Tepsi simgesi varyantları ----------
+
+// Bağlantı yoksa gri, güncelleme varsa sağ alt köşeye yeşil nokta
+fn tray_icon_variant(
+    base: &tauri::image::Image<'_>,
+    offline: bool,
+    update: bool,
+) -> tauri::image::Image<'static> {
+    let (w, h) = (base.width(), base.height());
+    let mut rgba = base.rgba().to_vec();
+
+    if offline {
+        for px in rgba.chunks_exact_mut(4) {
+            let g = (0.299 * px[0] as f32 + 0.587 * px[1] as f32 + 0.114 * px[2] as f32) as u8;
+            px[0] = g;
+            px[1] = g;
+            px[2] = g;
+        }
+    }
+
+    if update {
+        let r = w.min(h) as f32 * 0.3;
+        let (cx, cy) = (w as f32 - r, h as f32 - r);
+        for y in 0..h {
+            for x in 0..w {
+                let dx = x as f32 + 0.5 - cx;
+                let dy = y as f32 + 0.5 - cy;
+                if dx * dx + dy * dy <= r * r {
+                    let i = ((y * w + x) * 4) as usize;
+                    rgba[i] = 34;
+                    rgba[i + 1] = 197;
+                    rgba[i + 2] = 94;
+                    rgba[i + 3] = 255;
+                }
+            }
+        }
+    }
+
+    tauri::image::Image::new_owned(rgba, w, h)
+}
+
+// ---------- Veri temizleme ----------
+
+// Pencere açıkken WebView veri klasörü kilitli olabilir. Bu yüzden işaret dosyası bırakıp
+// uygulamayı yeniden başlatır; temizlik bir sonraki açılışta, pencere oluşmadan önce yapılır.
+#[tauri::command]
+fn clear_site_data(app: AppHandle) -> Result<(), String> {
+    let cfg = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&cfg).map_err(|e| e.to_string())?;
+    std::fs::write(cfg.join("clear-site-data"), b"").map_err(|e| e.to_string())?;
+    app.restart()
 }
 
 // ---------- Ayar dosyası ----------
@@ -347,6 +454,9 @@ fn set_settings(
         app.autolaunch().disable().map_err(|e| e.to_string())?;
     }
     write_settings(&app, &settings)?;
+    if let Some(w) = app.get_webview_window("main") {
+        apply_titlebar(&w, settings.title_bar_match);
+    }
     *state.settings.lock().unwrap() = settings;
     Ok(())
 }
@@ -433,27 +543,29 @@ fn open_connect_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-// Siteye ulaşılabiliyor mu? Webview ağını ve CORS'u kullanmadan, doğrudan TCP ile 443 portuna bakar.
-fn site_reachable() -> bool {
-    let Ok(addrs) = ("topluyo.com", 443).to_socket_addrs() else {
-        return false;
-    };
-    addrs
-        .into_iter()
-        .any(|addr| TcpStream::connect_timeout(&addr, Duration::from_secs(6)).is_ok())
+// Siteye gerçek bir HTTP isteği atar. Dönüş: "ok" | "server" | "offline"
+fn check_site_blocking() -> &'static str {
+    match ureq::get(SITE_URL).timeout(Duration::from_secs(8)).call() {
+        Ok(_) => "ok",
+        Err(ureq::Error::Status(code, _)) if code < 500 => "ok",
+        Err(ureq::Error::Status(_, _)) => "server",
+        Err(_) => "offline",
+    }
 }
 
 #[tauri::command]
-async fn check_site(app: AppHandle) -> bool {
+async fn check_site(app: AppHandle) -> String {
     set_link_status(&app, "Bağlanıyor…");
-    let ok = tauri::async_runtime::spawn_blocking(site_reachable)
+    let result = tauri::async_runtime::spawn_blocking(check_site_blocking)
         .await
-        .unwrap_or(false);
-    log::info!("Site erişim kontrolü: {}", if ok { "başarılı" } else { "başarısız" });
-    if !ok {
-        set_link_status(&app, "Bağlantı yok");
+        .unwrap_or("offline");
+    log::info!("Site erişim kontrolü: {}", result);
+    match result {
+        "ok" => {}
+        "server" => set_link_status(&app, "Site yanıt vermiyor"),
+        _ => set_link_status(&app, "Bağlantı yok"),
     }
-    ok
+    result.to_string()
 }
 
 #[tauri::command]
@@ -462,6 +574,10 @@ async fn site_connected(app: AppHandle) -> Result<(), String> {
         create_main_window(&app).map_err(|e| e.to_string())?;
     }
     set_link_status(&app, "Bağlı");
+    if let Some(w) = app.get_webview_window("main") {
+        let on = app.state::<AppState>().settings.lock().unwrap().title_bar_match;
+        apply_titlebar(&w, on);
+    }
     if let Some(w) = app.get_webview_window("connect") {
         let _ = w.close();
     }
@@ -476,7 +592,7 @@ fn open_settings(app: &AppHandle) -> tauri::Result<()> {
     }
     WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Topluyo Ayarları")
-        .inner_size(440.0, 540.0)
+        .inner_size(440.0, 660.0)
         .resizable(false)
         .center()
         .build()?;
@@ -515,6 +631,10 @@ fn refresh_tray(app: &AppHandle) {
     }
     if let Some(tray) = app.tray_by_id("main-tray") {
         let _ = tray.set_tooltip(Some(text));
+        let offline = link == "Bağlantı yok" || link == "Site yanıt vermiyor";
+        if let Some(base) = app.default_window_icon() {
+            let _ = tray.set_icon(Some(tray_icon_variant(base, offline, pending)));
+        }
     }
 }
 
@@ -782,9 +902,21 @@ fn main() {
             close_current_window,
             site_connected,
             check_site,
+            clear_site_data,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+            if let Ok(cfg) = app.path().app_config_dir() {
+                let marker = cfg.join("clear-site-data");
+                if marker.exists() {
+                    let bases = [app.path().app_local_data_dir(), app.path().app_data_dir()];
+                    for base in bases.into_iter().flatten() {
+                        let _ = std::fs::remove_dir_all(base.join("EBWebView"));
+                    }
+                    let _ = std::fs::remove_file(&marker);
+                    log::info!("Oturum ve önbellek temizlendi");
+                }
+            }
             let settings = load_settings(&handle);
             app.manage(AppState {
                 settings: Mutex::new(settings),
