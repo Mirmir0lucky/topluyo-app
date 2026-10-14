@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::menu::MenuItem;
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::{ManagerExt as AutostartExt, MacosLauncher};
@@ -24,6 +24,55 @@ const AUTH_HOSTS: &[&str] = &[
     "live.com",
     "apple.com",
 ];
+
+// Sitenin içine eklenen dişli simgesi. Tıklanınca topluyo-action:// adresine gider,
+// Rust tarafı bunu yakalayıp ayarları açar. Site tarafına hiçbir yetki verilmez.
+// Konumu değiştirmek için POSITION satırını düzenle.
+const GEAR_JS: &str = r#"
+(function () {
+  if (!location.hostname.endsWith('topluyo.com')) return;
+  const POSITION = { bottom: '78px', right: '18px' };
+
+  function addGear() {
+    if (document.getElementById('topluyo-gear')) return;
+    const a = document.createElement('a');
+    a.id = 'topluyo-gear';
+    a.href = 'topluyo-action://settings';
+    a.title = 'Ayarlar';
+    a.textContent = '⚙';
+    Object.assign(a.style, {
+      position: 'fixed',
+      bottom: POSITION.bottom,
+      right: POSITION.right,
+      zIndex: '2147483647',
+      width: '34px',
+      height: '34px',
+      borderRadius: '10px',
+      background: '#1c1a1e',
+      color: '#f2f0f3',
+      border: '1px solid #2c2830',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      textDecoration: 'none',
+      fontSize: '17px',
+      cursor: 'pointer',
+      opacity: '0.85',
+      boxShadow: '0 4px 14px rgba(0,0,0,0.35)'
+    });
+    a.onmouseenter = () => { a.style.borderColor = '#e012b5'; a.style.opacity = '1'; };
+    a.onmouseleave = () => { a.style.borderColor = '#2c2830'; a.style.opacity = '0.85'; };
+    document.body.appendChild(a);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', addGear);
+  } else {
+    addGear();
+  }
+  setInterval(addGear, 2000);
+})();
+"#;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -223,7 +272,25 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .title("Topluyo")
         .inner_size(1280.0, 800.0)
         .min_inner_size(800.0, 600.0)
+        .initialization_script(GEAR_JS)
         .on_navigation(move |url| {
+            // Dişli simgesinden gelen özel adresler
+            if url.scheme() == "topluyo-action" {
+                match url.host_str() {
+                    Some("settings") => {
+                        let _ = open_settings(&nav_app);
+                    }
+                    Some("check_update") => {
+                        let handle = nav_app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            check_for_update(handle, true).await;
+                        });
+                    }
+                    _ => {}
+                }
+                return false;
+            }
+
             if is_site_url(&url) || is_local_url(&url) || is_auth_url(&url) {
                 true
             } else {
@@ -243,35 +310,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-// ---------- Uygulama menüsü (Ayarlar burada da var) ----------
-
-fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let settings_item = MenuItem::with_id(app, "settings", "Ayarlar", true, Some("CmdOrCtrl+,"))?;
-    let check_item = MenuItem::with_id(app, "check_update", "Güncellemeleri denetle", true, None::<&str>)?;
-    let sep = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
-    let topluyo_menu = Submenu::with_items(
-        app,
-        "Topluyo",
-        true,
-        &[&settings_item, &check_item, &sep, &quit_item],
-    )?;
-
-    let undo = PredefinedMenuItem::undo(app, None)?;
-    let redo = PredefinedMenuItem::redo(app, None)?;
-    let cut = PredefinedMenuItem::cut(app, None)?;
-    let copy = PredefinedMenuItem::copy(app, None)?;
-    let paste = PredefinedMenuItem::paste(app, None)?;
-    let select_all = PredefinedMenuItem::select_all(app, None)?;
-    let edit_menu = Submenu::with_items(
-        app,
-        "Düzenle",
-        true,
-        &[&undo, &redo, &cut, &copy, &paste, &select_all],
-    )?;
-
-    Menu::with_items(app, &[&topluyo_menu, &edit_menu])
-}
+// ---------- Tepsi (sistem tepsisi) ----------
 
 fn handle_menu_event(app: &AppHandle, id: &str) {
     match id {
@@ -290,14 +329,12 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
     }
 }
 
-// ---------- Tepsi (sistem tepsisi) ----------
-
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Göster", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Ayarlar", true, None::<&str>)?;
     let check = MenuItem::with_id(app, "check_update", "Güncellemeleri denetle", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &settings, &check, &quit])?;
+    let menu = tauri::menu::Menu::with_items(app, &[&show, &settings, &check, &quit])?;
 
     let icon = app.default_window_icon().cloned();
 
@@ -396,13 +433,11 @@ fn main() {
                 pending_update: Mutex::new(None),
                 postponed: Mutex::new(false),
             });
-            handle.set_menu(build_app_menu(&handle)?)?;
             create_main_window(&handle)?;
             build_tray(app)?;
             tauri::async_runtime::spawn(update_loop(handle));
             Ok(())
         })
-        .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 match window.label() {
