@@ -7,38 +7,39 @@
   <style>
     :root {
       color-scheme: dark;
-      --text: #f2eef3;
-      --muted: #9d93a1;
-      --line: #332b35;
-      --accent: #d43ca3;
-      --accent2: #7a2a86;
+      --bg: #141215;
+      --text: #f2f0f3;
+      --muted: #8f8896;
+      --line: #2c2830;
+      --accent: #e012b5;
+      --accent-hover: #c40ea0;
     }
     html, body { margin: 0; height: 100%; }
     body {
       display: flex;
       align-items: center;
       justify-content: center;
+      background: var(--bg);
       color: var(--text);
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: linear-gradient(180deg, #171416 0%, #1f1820 45%, #2c1a2e 80%, #35153a 100%);
+      font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
     }
     .box { text-align: center; padding: 24px; }
     .hidden { display: none !important; }
     .spinner {
-      width: 36px; height: 36px; margin: 0 auto 16px;
+      width: 34px; height: 34px; margin: 0 auto 16px;
       border-radius: 50%;
       border: 3px solid var(--line);
       border-top-color: var(--accent);
       animation: spin 0.9s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    h1 { font-size: 20px; margin: 0 0 6px; }
+    h1 { font-size: 18px; font-weight: 700; margin: 0 0 6px; }
     p { color: var(--muted); font-size: 14px; margin: 6px 0 18px; }
     .btn {
-      background: linear-gradient(90deg, var(--accent), var(--accent2));
-      color: #fff; border: 0; padding: 10px 22px;
-      border-radius: 10px; font-size: 14px; cursor: pointer;
+      background: var(--accent); color: #fff; border: 0;
+      padding: 10px 22px; border-radius: 10px; font-size: 14px; cursor: pointer;
     }
+    .btn:hover { background: var(--accent-hover); }
   </style>
 </head>
 <body>

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -14,6 +14,16 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 const SITE_HOST: &str = "topluyo.com";
+
+// Giriş (Google vb.) için açılan sayfalar uygulama içinde kalır.
+const AUTH_HOSTS: &[&str] = &[
+    "google.com",
+    "github.com",
+    "discord.com",
+    "microsoftonline.com",
+    "live.com",
+    "apple.com",
+];
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -118,6 +128,11 @@ fn postpone_update(app: AppHandle, state: tauri::State<AppState>) {
 }
 
 #[tauri::command]
+fn close_current_window(window: tauri::WebviewWindow) {
+    let _ = window.close();
+}
+
+#[tauri::command]
 async fn install_update(app: AppHandle) -> Result<(), String> {
     let update = {
         let state = app.state::<AppState>();
@@ -150,7 +165,7 @@ fn open_settings(app: &AppHandle) -> tauri::Result<()> {
     }
     WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Topluyo Ayarları")
-        .inner_size(460.0, 520.0)
+        .inner_size(440.0, 540.0)
         .resizable(false)
         .center()
         .build()?;
@@ -165,7 +180,7 @@ fn open_update_window(app: &AppHandle) -> tauri::Result<()> {
     }
     WebviewWindowBuilder::new(app, "update", WebviewUrl::App("update.html".into()))
         .title("Topluyo Güncelleme")
-        .inner_size(420.0, 250.0)
+        .inner_size(400.0, 230.0)
         .resizable(false)
         .center()
         .always_on_top(true)
@@ -173,12 +188,22 @@ fn open_update_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-// Ana pencere: topluyo.com'a giden ve yerel açılış sayfası. Dış linkler sistem tarayıcısında açılır.
+// ---------- Site ve bağlantı yönetimi ----------
+
 fn is_site_url(url: &Url) -> bool {
     match url.host_str() {
         Some(host) => host == SITE_HOST || host.ends_with(".topluyo.com"),
         None => false,
     }
+}
+
+fn is_auth_url(url: &Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    AUTH_HOSTS
+        .iter()
+        .any(|h| host == *h || host.ends_with(&format!(".{}", h)))
 }
 
 fn is_local_url(url: &Url) -> bool {
@@ -199,7 +224,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .inner_size(1280.0, 800.0)
         .min_inner_size(800.0, 600.0)
         .on_navigation(move |url| {
-            if is_site_url(&url) || is_local_url(&url) {
+            if is_site_url(&url) || is_local_url(&url) || is_auth_url(&url) {
                 true
             } else {
                 open_external(&nav_app, &url);
@@ -207,11 +232,62 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
             }
         })
         .on_new_window(move |url, _features| {
-            open_external(&new_app, &url);
-            NewWindowResponse::Deny
+            if is_site_url(&url) || is_auth_url(&url) {
+                NewWindowResponse::Allow
+            } else {
+                open_external(&new_app, &url);
+                NewWindowResponse::Deny
+            }
         })
         .build()?;
     Ok(())
+}
+
+// ---------- Uygulama menüsü (Ayarlar burada da var) ----------
+
+fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let settings_item = MenuItem::with_id(app, "settings", "Ayarlar", true, Some("CmdOrCtrl+,"))?;
+    let check_item = MenuItem::with_id(app, "check_update", "Güncellemeleri denetle", true, None::<&str>)?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
+    let topluyo_menu = Submenu::with_items(
+        app,
+        "Topluyo",
+        true,
+        &[&settings_item, &check_item, &sep, &quit_item],
+    )?;
+
+    let undo = PredefinedMenuItem::undo(app, None)?;
+    let redo = PredefinedMenuItem::redo(app, None)?;
+    let cut = PredefinedMenuItem::cut(app, None)?;
+    let copy = PredefinedMenuItem::copy(app, None)?;
+    let paste = PredefinedMenuItem::paste(app, None)?;
+    let select_all = PredefinedMenuItem::select_all(app, None)?;
+    let edit_menu = Submenu::with_items(
+        app,
+        "Düzenle",
+        true,
+        &[&undo, &redo, &cut, &copy, &paste, &select_all],
+    )?;
+
+    Menu::with_items(app, &[&topluyo_menu, &edit_menu])
+}
+
+fn handle_menu_event(app: &AppHandle, id: &str) {
+    match id {
+        "show" => show_main(app),
+        "settings" => {
+            let _ = open_settings(app);
+        }
+        "check_update" => {
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                check_for_update(handle, true).await;
+            });
+        }
+        "quit" => app.exit(0),
+        _ => {}
+    }
 }
 
 // ---------- Tepsi (sistem tepsisi) ----------
@@ -229,20 +305,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .tooltip("Topluyo")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => show_main(app),
-            "settings" => {
-                let _ = open_settings(app);
-            }
-            "check_update" => {
-                let handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    check_for_update(handle, true).await;
-                });
-            }
-            "quit" => app.exit(0),
-            _ => {}
-        })
+        .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -323,6 +386,7 @@ fn main() {
             pending_update_version,
             install_update,
             postpone_update,
+            close_current_window,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -332,11 +396,13 @@ fn main() {
                 pending_update: Mutex::new(None),
                 postponed: Mutex::new(false),
             });
+            handle.set_menu(build_app_menu(&handle)?)?;
             create_main_window(&handle)?;
             build_tray(app)?;
             tauri::async_runtime::spawn(update_loop(handle));
             Ok(())
         })
+        .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 match window.label() {

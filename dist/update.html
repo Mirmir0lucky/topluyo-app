@@ -7,56 +7,65 @@
   <style>
     :root {
       color-scheme: dark;
-      --text: #f2eef3;
-      --muted: #9d93a1;
-      --line: #332b35;
-      --accent: #d43ca3;
-      --accent2: #7a2a86;
+      --card: #1c1a1e;
+      --field: #17151a;
+      --line: #2c2830;
+      --text: #f2f0f3;
+      --muted: #8f8896;
+      --accent: #e012b5;
+      --accent-hover: #c40ea0;
       --err: #ff7a9c;
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; }
     body {
+      background: var(--card);
       color: var(--text);
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: linear-gradient(180deg, #171416 0%, #1f1820 45%, #2c1a2e 80%, #35153a 100%);
+      font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+      padding: 20px 22px;
       display: flex;
-      align-items: center;
-      justify-content: center;
+      flex-direction: column;
+      user-select: none;
     }
-    .box { padding: 28px; width: 100%; }
-    .badge {
-      display: inline-block; font-size: 11px; letter-spacing: 0.1em;
-      color: var(--accent); border: 1px solid var(--accent);
-      padding: 3px 8px; border-radius: 999px; margin-bottom: 12px;
+    .head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
     }
-    h1 { font-size: 20px; margin: 0 0 8px; }
-    p { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0 0 18px; }
+    h1 { font-size: 18px; font-weight: 700; margin: 0; }
+    .x {
+      background: transparent; border: 0; color: var(--muted);
+      font-size: 22px; line-height: 1; cursor: pointer;
+      padding: 4px 9px; border-radius: 8px;
+    }
+    .x:hover { color: var(--text); background: var(--field); }
+    p { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0 0 14px; }
     .err { color: var(--err); font-size: 13px; }
     .hidden { display: none !important; }
-    .actions { display: flex; justify-content: flex-end; gap: 10px; }
+    .actions {
+      margin-top: auto;
+      display: flex; justify-content: flex-end; gap: 10px;
+    }
     .btn {
-      border: 1px solid var(--line); background: transparent; color: var(--text);
-      padding: 10px 16px; border-radius: 10px; font-size: 14px; cursor: pointer;
+      background: var(--field); color: var(--text);
+      border: 1px solid var(--line); padding: 10px 18px;
+      border-radius: 10px; font-size: 14px; cursor: pointer;
     }
     .btn:hover { border-color: var(--accent); }
     .btn:disabled { opacity: 0.5; cursor: default; }
-    .btn.primary {
-      background: linear-gradient(90deg, var(--accent), var(--accent2));
-      border: 0; color: #fff;
-    }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
   </style>
 </head>
 <body>
-  <div class="box">
-    <div class="badge">GÜNCELLEME</div>
+  <div class="head">
     <h1>Yeni sürüm hazır</h1>
-    <p id="text">Topluyo'nun yeni sürümü indirilip kurulabilir. Şimdi yüklemek ister misin?</p>
-    <p id="err" class="err hidden"></p>
-    <div class="actions">
-      <button id="later" class="btn">Sonra</button>
-      <button id="now" class="btn primary">Şimdi yükle</button>
-    </div>
+    <button class="x" id="close" title="Kapat">×</button>
+  </div>
+  <p id="text">Topluyo'nun yeni sürümü indirilip kurulabilir. Şimdi yüklemek ister misin?</p>
+  <p id="err" class="err hidden"></p>
+  <div class="actions">
+    <button id="later" class="btn">Sonra</button>
+    <button id="now" class="btn primary">Şimdi yükle</button>
   </div>
 
   <script>
@@ -67,6 +76,7 @@
     const now = document.getElementById('now');
 
     later.addEventListener('click', () => invoke('postpone_update'));
+    document.getElementById('close').addEventListener('click', () => invoke('close_current_window'));
 
     now.addEventListener('click', async () => {
       later.disabled = true;
