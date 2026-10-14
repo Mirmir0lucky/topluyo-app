@@ -27,17 +27,7 @@
       flex-direction: column;
       user-select: none;
     }
-    .head {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 12px;
-    }
-    h1 { font-size: 18px; font-weight: 700; margin: 0; }
-    .x {
-      background: transparent; border: 0; color: var(--muted);
-      font-size: 22px; line-height: 1; cursor: pointer;
-      padding: 4px 9px; border-radius: 8px;
-    }
-    .x:hover { color: var(--text); background: var(--field); }
+    h1 { font-size: 18px; font-weight: 700; margin: 0 0 12px; }
     p { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0 0 14px; }
     .err { color: var(--err); font-size: 13px; }
     .hidden { display: none !important; }
@@ -57,10 +47,7 @@
   </style>
 </head>
 <body>
-  <div class="head">
-    <h1>Yeni sürüm hazır</h1>
-    <button class="x" id="close" title="Kapat">×</button>
-  </div>
+  <h1>Yeni sürüm hazır</h1>
   <p id="text">Topluyo'nun yeni sürümü indirilip kurulabilir. Şimdi yüklemek ister misin?</p>
   <p id="err" class="err hidden"></p>
   <div class="actions">
@@ -76,7 +63,6 @@
     const now = document.getElementById('now');
 
     later.addEventListener('click', () => invoke('postpone_update'));
-    document.getElementById('close').addEventListener('click', () => invoke('close_current_window'));
 
     now.addEventListener('click', async () => {
       later.disabled = true;

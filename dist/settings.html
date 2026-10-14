@@ -25,17 +25,7 @@
       padding: 20px 22px;
       user-select: none;
     }
-    .head {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 14px;
-    }
-    h1 { font-size: 18px; font-weight: 700; margin: 0; }
-    .x {
-      background: transparent; border: 0; color: var(--muted);
-      font-size: 22px; line-height: 1; cursor: pointer;
-      padding: 4px 9px; border-radius: 8px;
-    }
-    .x:hover { color: var(--text); background: var(--field); }
+    h1 { font-size: 18px; font-weight: 700; margin: 0 0 14px; }
     .group { font-size: 12px; color: var(--muted); margin: 16px 2px 8px; }
     .card {
       background: var(--card); border: 1px solid var(--line);
@@ -69,17 +59,12 @@
       white-space: nowrap;
     }
     .btn:hover { border-color: var(--accent); }
-    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
     .status { font-size: 12px; color: var(--muted); margin-top: 14px; min-height: 16px; }
     .version { font-size: 12px; color: var(--muted); margin-top: 6px; text-align: center; }
   </style>
 </head>
 <body>
-  <div class="head">
-    <h1>Ayarlar</h1>
-    <button class="x" id="close" title="Kapat">×</button>
-  </div>
+  <h1>Ayarlar</h1>
 
   <div class="group">Pencere</div>
   <div class="card">
@@ -166,7 +151,6 @@
       }
 
       document.getElementById('version').textContent = 'Sürüm ' + await invoke('app_version');
-      document.getElementById('close').addEventListener('click', () => invoke('close_current_window'));
 
       document.getElementById('check').addEventListener('click', async () => {
         setStatus('Denetleniyor…');

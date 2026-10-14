@@ -48,17 +48,16 @@ const GEAR_JS: &str = r#"
       width: '32px',
       height: '32px',
       padding: '0',
-      borderRadius: '8px',
-      background: '#1c1a1e',
+      background: 'transparent',
       color: '#f2f0f3',
-      border: '1px solid #2c2830',
-      fontSize: '16px',
+      border: 'none',
+      fontSize: '18px',
       lineHeight: '1',
       cursor: 'pointer',
       opacity: '0.9'
     });
-    btn.addEventListener('mouseenter', () => { btn.style.borderColor = '#e012b5'; btn.style.opacity = '1'; });
-    btn.addEventListener('mouseleave', () => { btn.style.borderColor = '#2c2830'; btn.style.opacity = '0.9'; });
+    btn.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
+    btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.9'; });
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
