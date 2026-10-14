@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Topluyo</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --text: #f2eef3;
+      --muted: #9d93a1;
+      --line: #332b35;
+      --accent: #d43ca3;
+      --accent2: #7a2a86;
+    }
+    html, body { margin: 0; height: 100%; }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(180deg, #171416 0%, #1f1820 45%, #2c1a2e 80%, #35153a 100%);
+    }
+    .box { text-align: center; padding: 24px; }
+    .hidden { display: none !important; }
+    .spinner {
+      width: 36px; height: 36px; margin: 0 auto 16px;
+      border-radius: 50%;
+      border: 3px solid var(--line);
+      border-top-color: var(--accent);
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    p { color: var(--muted); font-size: 14px; margin: 6px 0 18px; }
+    .btn {
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      color: #fff; border: 0; padding: 10px 22px;
+      border-radius: 10px; font-size: 14px; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div id="loading">
+      <div class="spinner"></div>
+      <p>Topluyo yükleniyor…</p>
+    </div>
+    <div id="offline" class="hidden">
+      <h1>Bağlantı yok</h1>
+      <p>İnternet bağlantını kontrol edip tekrar dene.</p>
+      <button id="retry" class="btn">Tekrar dene</button>
+    </div>
+  </div>
+
+  <script>
+    const SITE = 'https://topluyo.com/';
+    const loading = document.getElementById('loading');
+    const offline = document.getElementById('offline');
+
+    async function tryOpen() {
+      loading.classList.remove('hidden');
+      offline.classList.add('hidden');
+
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        await fetch(SITE, { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal });
+        clearTimeout(timer);
+        location.replace(SITE);
+      } catch (e) {
+        clearTimeout(timer);
+        loading.classList.add('hidden');
+        offline.classList.remove('hidden');
+      }
+    }
+
+    document.getElementById('retry').addEventListener('click', tryOpen);
+    window.addEventListener('online', tryOpen);
+    tryOpen();
+  </script>
+</body>
+</html>

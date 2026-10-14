@@ -7,17 +7,8 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Topluyo",
-        "url": "https://topluyo.com",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600
-      }
-    ]
+    "withGlobalTauri": true,
+    "windows": []
   },
   "bundle": {
     "active": true,
@@ -33,9 +24,9 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2MEQ5QTE5QzU4QjNGODYKUldTR1A0dkZHWm9OVm56QUhUcUZpL0JHSk5UWXVnWno5cStZV2wxNkZMellNU09MUDFCV3VNSEcK",
+      "pubkey": "BURAYA_PUBLIC_KEY",
       "endpoints": [
-        "https://github.com/Mirmir0lucky/topluyo-app/releases/latest/download/latest.json"
+        "https://github.com/KULLANICI/REPO/releases/latest/download/latest.json"
       ]
     }
   }
