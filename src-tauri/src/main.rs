@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::menu::MenuItem;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::{ManagerExt as AutostartExt, MacosLauncher};
@@ -25,44 +25,46 @@ const AUTH_HOSTS: &[&str] = &[
     "apple.com",
 ];
 
-// Sitenin içine eklenen dişli simgesi. Tıklanınca topluyo-action:// adresine gider,
+// Sitenin sol alt tarafına eklenen dişli düğmesi. Tıklanınca topluyo-action:// adresine gider,
 // Rust tarafı bunu yakalayıp ayarları açar. Site tarafına hiçbir yetki verilmez.
 // Konumu değiştirmek için POSITION satırını düzenle.
 const GEAR_JS: &str = r#"
 (function () {
   if (!location.hostname.endsWith('topluyo.com')) return;
-  const POSITION = { bottom: '78px', right: '18px' };
+  const POSITION = { left: '112px', bottom: '8px' };
 
   function addGear() {
     if (document.getElementById('topluyo-gear')) return;
-    const a = document.createElement('a');
-    a.id = 'topluyo-gear';
-    a.href = 'topluyo-action://settings';
-    a.title = 'Ayarlar';
-    a.textContent = '⚙';
-    Object.assign(a.style, {
+    const btn = document.createElement('button');
+    btn.id = 'topluyo-gear';
+    btn.type = 'button';
+    btn.title = 'Ayarlar';
+    btn.textContent = '⚙';
+    Object.assign(btn.style, {
       position: 'fixed',
+      left: POSITION.left,
       bottom: POSITION.bottom,
-      right: POSITION.right,
       zIndex: '2147483647',
-      width: '34px',
-      height: '34px',
-      borderRadius: '10px',
+      width: '32px',
+      height: '32px',
+      padding: '0',
+      borderRadius: '8px',
       background: '#1c1a1e',
       color: '#f2f0f3',
       border: '1px solid #2c2830',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      textDecoration: 'none',
-      fontSize: '17px',
+      fontSize: '16px',
+      lineHeight: '1',
       cursor: 'pointer',
-      opacity: '0.85',
-      boxShadow: '0 4px 14px rgba(0,0,0,0.35)'
+      opacity: '0.9'
     });
-    a.onmouseenter = () => { a.style.borderColor = '#e012b5'; a.style.opacity = '1'; };
-    a.onmouseleave = () => { a.style.borderColor = '#2c2830'; a.style.opacity = '0.85'; };
-    document.body.appendChild(a);
+    btn.addEventListener('mouseenter', () => { btn.style.borderColor = '#e012b5'; btn.style.opacity = '1'; });
+    btn.addEventListener('mouseleave', () => { btn.style.borderColor = '#2c2830'; btn.style.opacity = '0.9'; });
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      location.href = 'topluyo-action://settings';
+    }, true);
+    document.body.appendChild(btn);
   }
 
   if (document.readyState === 'loading') {
@@ -265,6 +267,24 @@ fn open_external(app: &AppHandle, url: &Url) {
     let _ = app.opener().open_url(url.as_str(), None::<&str>);
 }
 
+// Sitenin dişli düğmesinden gelen işlemleri çalıştırır.
+// Pencere oluşturma, navigasyon olayının içinde değil ayrı bir görevde yapılır.
+fn handle_action(app: &AppHandle, action: &str) {
+    let app = app.clone();
+    let action = action.to_string();
+    tauri::async_runtime::spawn(async move {
+        match action.as_str() {
+            "settings" => {
+                let _ = open_settings(&app);
+            }
+            "check_update" => {
+                check_for_update(app, true).await;
+            }
+            _ => {}
+        }
+    });
+}
+
 fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
     let nav_app = app.clone();
     let new_app = app.clone();
@@ -274,20 +294,8 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .min_inner_size(800.0, 600.0)
         .initialization_script(GEAR_JS)
         .on_navigation(move |url| {
-            // Dişli simgesinden gelen özel adresler
             if url.scheme() == "topluyo-action" {
-                match url.host_str() {
-                    Some("settings") => {
-                        let _ = open_settings(&nav_app);
-                    }
-                    Some("check_update") => {
-                        let handle = nav_app.clone();
-                        tauri::async_runtime::spawn(async move {
-                            check_for_update(handle, true).await;
-                        });
-                    }
-                    _ => {}
-                }
+                handle_action(&nav_app, url.host_str().unwrap_or(""));
                 return false;
             }
 
@@ -299,6 +307,10 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
             }
         })
         .on_new_window(move |url, _features| {
+            if url.scheme() == "topluyo-action" {
+                handle_action(&new_app, url.host_str().unwrap_or(""));
+                return NewWindowResponse::Deny;
+            }
             if is_site_url(&url) || is_auth_url(&url) {
                 NewWindowResponse::Allow
             } else {
