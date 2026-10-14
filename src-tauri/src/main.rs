@@ -48,6 +48,50 @@ const SITE_SCRIPT: &str = r#"
     location.href = url;
   }
 
+  // ---------- Güncelleme düğmesi (Rust tarafı açıp kapatır) ----------
+  let updateOn = false;
+  function applyUpdate() {
+    let b = document.getElementById('topluyo-update');
+    if (!updateOn) {
+      if (b) b.remove();
+      return;
+    }
+    if (b) return;
+    b = document.createElement('button');
+    b.id = 'topluyo-update';
+    b.type = 'button';
+    b.title = 'Güncelleme hazır';
+    b.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="M6 11l6 6 6-6"/><path d="M5 20h14"/></svg>';
+    Object.assign(b.style, {
+      position: 'fixed',
+      left: '150px',
+      bottom: '11px',
+      zIndex: '2147483647',
+      width: '26px',
+      height: '26px',
+      padding: '0',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: '#22c55e',
+      color: '#06140b',
+      border: 'none',
+      borderRadius: '50%',
+      cursor: 'pointer',
+      boxShadow: '0 0 0 3px rgba(34,197,94,0.25)'
+    });
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      go('topluyo-action://update');
+    }, true);
+    document.body.appendChild(b);
+  }
+  window.__topluyoSetUpdate = (on) => {
+    updateOn = !!on;
+    applyUpdate();
+  };
+
   // ---------- Ayarlar düğmesi ----------
   function addGear() {
     if (document.getElementById('topluyo-gear')) return;
@@ -227,7 +271,9 @@ const SITE_SCRIPT: &str = r#"
   } else {
     addGear();
   }
-  setInterval(addGear, 2000);
+  setInterval(() => { addGear(); applyUpdate(); }, 2000);
+  // Sayfa hazır olunca Rust'a haber ver; Rust güncel güncelleme durumunu geri gönderir
+  document.addEventListener('DOMContentLoaded', () => go('topluyo-action://ready'));
 })();
 "#;
 
@@ -253,6 +299,7 @@ struct AppState {
     settings: Mutex<Settings>,
     pending_update: Mutex<Option<Update>>,
     postponed: Mutex<bool>,
+    link: Mutex<String>,
 }
 
 // ---------- Ayar dosyası ----------
@@ -346,6 +393,8 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
         taken
     };
     let update = update.ok_or("Bekleyen güncelleme yok")?;
+    set_site_update(&app, false);
+    refresh_tray(&app);
     update
         .download_and_install(|_, _| {}, || {})
         .await
@@ -395,10 +444,16 @@ fn site_reachable() -> bool {
 }
 
 #[tauri::command]
-async fn check_site() -> bool {
-    tauri::async_runtime::spawn_blocking(site_reachable)
+async fn check_site(app: AppHandle) -> bool {
+    set_link_status(&app, "Bağlanıyor…");
+    let ok = tauri::async_runtime::spawn_blocking(site_reachable)
         .await
-        .unwrap_or(false)
+        .unwrap_or(false);
+    log::info!("Site erişim kontrolü: {}", if ok { "başarılı" } else { "başarısız" });
+    if !ok {
+        set_link_status(&app, "Bağlantı yok");
+    }
+    ok
 }
 
 #[tauri::command]
@@ -406,6 +461,7 @@ async fn site_connected(app: AppHandle) -> Result<(), String> {
     if app.get_webview_window("main").is_none() {
         create_main_window(&app).map_err(|e| e.to_string())?;
     }
+    set_link_status(&app, "Bağlı");
     if let Some(w) = app.get_webview_window("connect") {
         let _ = w.close();
     }
@@ -441,6 +497,49 @@ fn open_update_window(app: &AppHandle) -> tauri::Result<()> {
         .always_on_top(true)
         .build()?;
     Ok(())
+}
+
+// ---------- Tepsi durumu ve güncelleme düğmesi ----------
+
+// Tepsi ipucu: "Topluyo — Bağlı · Güncelleme hazır" gibi
+fn refresh_tray(app: &AppHandle) {
+    let link = app.state::<AppState>().link.lock().unwrap().clone();
+    let pending = app.state::<AppState>().pending_update.lock().unwrap().is_some();
+    let mut text = String::from("Topluyo");
+    if !link.is_empty() {
+        text.push_str(" — ");
+        text.push_str(&link);
+    }
+    if pending {
+        text.push_str(" · Güncelleme hazır");
+    }
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let _ = tray.set_tooltip(Some(text));
+    }
+}
+
+fn set_link_status(app: &AppHandle, status: &str) {
+    *app.state::<AppState>().link.lock().unwrap() = status.to_string();
+    refresh_tray(app);
+}
+
+// Sitenin yeşil güncelleme düğmesini aç/kapat
+fn set_site_update(app: &AppHandle, on: bool) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.eval(&format!(
+            "window.__topluyoSetUpdate && window.__topluyoSetUpdate({});",
+            on
+        ));
+    }
+}
+
+fn open_logs(app: &AppHandle) {
+    if let Ok(dir) = app.path().app_log_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = app
+            .opener()
+            .open_path(dir.to_string_lossy().to_string(), None::<&str>);
+    }
 }
 
 // ---------- Site ve bağlantı yönetimi ----------
@@ -484,6 +583,16 @@ fn handle_action(app: &AppHandle, action: &str) {
             }
             "check_update" => {
                 check_for_update(app, true).await;
+            }
+            "ready" => {
+                let on = app.state::<AppState>().pending_update.lock().unwrap().is_some();
+                set_site_update(&app, on);
+            }
+            "update" => {
+                let has = app.state::<AppState>().pending_update.lock().unwrap().is_some();
+                if has {
+                    let _ = open_update_window(&app);
+                }
             }
             "paste" => {
                 if let Ok(text) = app.clipboard().read_text() {
@@ -560,6 +669,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
                 check_for_update(handle, true).await;
             });
         }
+        "logs" => open_logs(app),
         "quit" => app.exit(0),
         _ => {}
     }
@@ -569,8 +679,9 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Göster", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Ayarlar", true, None::<&str>)?;
     let check = MenuItem::with_id(app, "check_update", "Güncellemeleri denetle", true, None::<&str>)?;
+    let logs = MenuItem::with_id(app, "logs", "Günlük dosyasını aç", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
-    let menu = tauri::menu::Menu::with_items(app, &[&show, &settings, &check, &quit])?;
+    let menu = tauri::menu::Menu::with_items(app, &[&show, &settings, &check, &logs, &quit])?;
 
     let icon = app.default_window_icon().cloned();
 
@@ -612,11 +723,14 @@ async fn check_for_update(app: AppHandle, user_initiated: bool) -> &'static str 
 
     match updater.check().await {
         Ok(Some(update)) => {
+            log::info!("Yeni sürüm bulundu: {}", update.version);
+            *app.state::<AppState>().pending_update.lock().unwrap() = Some(update);
+            set_site_update(&app, true);
+            refresh_tray(&app);
             let postponed = *app.state::<AppState>().postponed.lock().unwrap();
             if postponed && !user_initiated {
                 return "postponed";
             }
-            *app.state::<AppState>().pending_update.lock().unwrap() = Some(update);
             let _ = open_update_window(&app);
             "available"
         }
@@ -647,6 +761,7 @@ async fn update_loop(app: AppHandle) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -675,7 +790,9 @@ fn main() {
                 settings: Mutex::new(settings),
                 pending_update: Mutex::new(None),
                 postponed: Mutex::new(false),
+                link: Mutex::new(String::new()),
             });
+            log::info!("Topluyo {} başlatıldı", handle.package_info().version);
             open_connect_window(&handle)?;
             build_tray(app)?;
             tauri::async_runtime::spawn(update_loop(handle));
