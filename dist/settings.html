@@ -116,6 +116,7 @@
   <div class="version" id="version"></div>
 
   <script>
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
     const { invoke } = window.__TAURI__.core;
     const TOGGLES = ['close_to_tray', 'start_on_login', 'auto_update_check'];
     const statusEl = document.getElementById('status');

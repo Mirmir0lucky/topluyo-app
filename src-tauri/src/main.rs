@@ -10,29 +10,43 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::{ManagerExt as AutostartExt, MacosLauncher};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 const SITE_HOST: &str = "topluyo.com";
 
-// Giriş (Google vb.) için açılan sayfalar uygulama içinde kalır.
+// Giriş sayfaları uygulama içinde açılır (Google girişi için). Diğer dış linkler tarayıcıda açılır.
 const AUTH_HOSTS: &[&str] = &[
-    "google.com",
-    "github.com",
-    "discord.com",
-    "microsoftonline.com",
-    "live.com",
-    "apple.com",
+    "accounts.google.com",
+    "appleid.apple.com",
+    "login.microsoftonline.com",
+    "login.live.com",
 ];
 
-// Sitenin sol alt tarafına eklenen dişli düğmesi. Tıklanınca topluyo-action:// adresine gider,
-// Rust tarafı bunu yakalayıp ayarları açar. Site tarafına hiçbir yetki verilmez.
-// Konumu değiştirmek için POSITION satırını düzenle.
-const GEAR_JS: &str = r#"
+// Sitenin içine eklenen script:
+// - sol alttaki dişli düğmesi (topluyo-action://settings)
+// - sağ tık menüsü (Kes, Kopyala, Yapıştır, Tümünü seç, bağlantıyı tarayıcıda aç)
+// - Ctrl+C / X / V / A kısayolları
+// - dış linkler (normal tık, Ctrl+tık, orta tık) sistem tarayıcısında açılır (topluyo-open://)
+// Bunların hepsi sadece özel adres yönlendirmesi kullanır, siteye IPC yetkisi verilmez.
+// Dişli konumunu değiştirmek için POSITION satırını düzenle.
+const SITE_SCRIPT: &str = r#"
 (function () {
   if (!location.hostname.endsWith('topluyo.com')) return;
-  const POSITION = { left: '112px', bottom: '8px' };
 
+  const POSITION = { left: '112px', bottom: '8px' };
+  const AUTH_HOSTS = ['accounts.google.com', 'appleid.apple.com', 'login.microsoftonline.com', 'login.live.com'];
+
+  function isAuthHost(h) {
+    return AUTH_HOSTS.some((a) => h === a || h.endsWith('.' + a));
+  }
+
+  function go(url) {
+    location.href = url;
+  }
+
+  // ---------- Ayarlar düğmesi ----------
   function addGear() {
     if (document.getElementById('topluyo-gear')) return;
     const btn = document.createElement('button');
@@ -61,10 +75,150 @@ const GEAR_JS: &str = r#"
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      location.href = 'topluyo-action://settings';
+      go('topluyo-action://settings');
     }, true);
     document.body.appendChild(btn);
   }
+
+  // ---------- Dış bağlantılar ----------
+  function externalLinkOf(el) {
+    const a = el && el.closest ? el.closest('a[href]') : null;
+    if (!a) return null;
+    let u;
+    try { u = new URL(a.href, location.href); } catch (e) { return null; }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    if (u.hostname.endsWith('topluyo.com')) return null;
+    if (isAuthHost(u.hostname)) return null;
+    return u.href;
+  }
+
+  function openExternal(url) {
+    go('topluyo-open://open?u=' + encodeURIComponent(url));
+  }
+
+  document.addEventListener('click', (e) => {
+    const url = externalLinkOf(e.target);
+    if (url) {
+      e.preventDefault();
+      e.stopPropagation();
+      openExternal(url);
+    }
+  }, true);
+
+  document.addEventListener('auxclick', (e) => {
+    if (e.button !== 1) return;
+    const url = externalLinkOf(e.target);
+    if (url) {
+      e.preventDefault();
+      e.stopPropagation();
+      openExternal(url);
+    }
+  }, true);
+
+  // ---------- Kısayollar ----------
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const k = (e.key || '').toLowerCase();
+    if (k === 'c') {
+      e.preventDefault(); e.stopPropagation(); document.execCommand('copy');
+    } else if (k === 'x') {
+      e.preventDefault(); e.stopPropagation(); document.execCommand('cut');
+    } else if (k === 'a') {
+      e.preventDefault(); e.stopPropagation(); document.execCommand('selectAll');
+    } else if (k === 'v') {
+      e.preventDefault(); e.stopPropagation(); go('topluyo-action://paste');
+    }
+  }, true);
+
+  // ---------- Sağ tık menüsü ----------
+  let menuEl = null;
+
+  function closeMenu() {
+    if (menuEl) {
+      menuEl.remove();
+      menuEl = null;
+    }
+  }
+
+  function menuItem(label, onClick) {
+    const b = document.createElement('div');
+    b.textContent = label;
+    Object.assign(b.style, {
+      padding: '7px 14px',
+      borderRadius: '6px',
+      cursor: 'pointer',
+      whiteSpace: 'nowrap',
+      background: 'transparent'
+    });
+    b.addEventListener('mouseenter', () => { b.style.background = '#2a2530'; });
+    b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; });
+    // Menüye tıklarken metin seçimi ve imleç kaybolmasın
+    b.addEventListener('mousedown', (e) => { e.preventDefault(); });
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeMenu();
+      onClick();
+    });
+    return b;
+  }
+
+  function separator() {
+    const s = document.createElement('div');
+    Object.assign(s.style, { height: '1px', background: '#2c2830', margin: '5px 6px' });
+    return s;
+  }
+
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeMenu();
+
+    const link = externalLinkOf(e.target);
+    const menu = document.createElement('div');
+    menuEl = menu;
+    Object.assign(menu.style, {
+      position: 'fixed',
+      left: e.clientX + 'px',
+      top: e.clientY + 'px',
+      zIndex: '2147483647',
+      background: '#1c1a1e',
+      color: '#f2f0f3',
+      border: '1px solid #2c2830',
+      borderRadius: '10px',
+      padding: '6px',
+      minWidth: '190px',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+      fontFamily: '"Segoe UI", system-ui, sans-serif',
+      fontSize: '13px',
+      userSelect: 'none'
+    });
+
+    if (link) {
+      menu.appendChild(menuItem('Bağlantıyı tarayıcıda aç', () => openExternal(link)));
+      menu.appendChild(separator());
+    }
+    menu.appendChild(menuItem('Kes', () => document.execCommand('cut')));
+    menu.appendChild(menuItem('Kopyala', () => document.execCommand('copy')));
+    menu.appendChild(menuItem('Yapıştır', () => go('topluyo-action://paste')));
+    menu.appendChild(separator());
+    menu.appendChild(menuItem('Tümünü seç', () => document.execCommand('selectAll')));
+
+    document.body.appendChild(menu);
+
+    // Ekran dışına taşarsa içeri çek
+    const r = menu.getBoundingClientRect();
+    if (r.right > window.innerWidth) menu.style.left = (window.innerWidth - r.width - 4) + 'px';
+    if (r.bottom > window.innerHeight) menu.style.top = (window.innerHeight - r.height - 4) + 'px';
+  }, true);
+
+  document.addEventListener('mousedown', (e) => {
+    if (menuEl && !menuEl.contains(e.target)) closeMenu();
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMenu();
+  }, true);
+  window.addEventListener('blur', closeMenu);
+  window.addEventListener('scroll', closeMenu, true);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', addGear);
@@ -263,11 +417,12 @@ fn is_local_url(url: &Url) -> bool {
 }
 
 fn open_external(app: &AppHandle, url: &Url) {
-    let _ = app.opener().open_url(url.as_str(), None::<&str>);
+    if url.scheme() == "http" || url.scheme() == "https" {
+        let _ = app.opener().open_url(url.as_str(), None::<&str>);
+    }
 }
 
-// Sitenin dişli düğmesinden gelen işlemleri çalıştırır.
-// Pencere oluşturma, navigasyon olayının içinde değil ayrı bir görevde yapılır.
+// Sitenin script'inden gelen işlemler. Pencere ve clipboard işi navigasyon olayının dışında yapılır.
 fn handle_action(app: &AppHandle, action: &str) {
     let app = app.clone();
     let action = action.to_string();
@@ -278,6 +433,15 @@ fn handle_action(app: &AppHandle, action: &str) {
             }
             "check_update" => {
                 check_for_update(app, true).await;
+            }
+            "paste" => {
+                if let Ok(text) = app.clipboard().read_text() {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let quoted = serde_json::to_string(&text).unwrap_or_else(|_| "\"\"".into());
+                        let js = format!("document.execCommand('insertText', false, {});", quoted);
+                        let _ = w.eval(&js);
+                    }
+                }
             }
             _ => {}
         }
@@ -291,10 +455,19 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .title("Topluyo")
         .inner_size(1280.0, 800.0)
         .min_inner_size(800.0, 600.0)
-        .initialization_script(GEAR_JS)
+        .initialization_script(SITE_SCRIPT)
         .on_navigation(move |url| {
             if url.scheme() == "topluyo-action" {
                 handle_action(&nav_app, url.host_str().unwrap_or(""));
+                return false;
+            }
+
+            if url.scheme() == "topluyo-open" {
+                if let Some((_, target)) = url.query_pairs().find(|(k, _)| k == "u") {
+                    if let Ok(target_url) = Url::parse(&target) {
+                        open_external(&nav_app, &target_url);
+                    }
+                }
                 return false;
             }
 
@@ -426,6 +599,7 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             get_settings,
             set_settings,

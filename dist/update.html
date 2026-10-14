@@ -56,6 +56,7 @@
   </div>
 
   <script>
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
     const { invoke } = window.__TAURI__.core;
     const text = document.getElementById('text');
     const err = document.getElementById('err');
