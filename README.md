@@ -15,29 +15,7 @@
   
 
 </div>
-
----
-
-## ✨ Özellikler
-
-- **🖥️ Yerel masaüstü deneyimi** — Topluyo'yu ayrı bir masaüstü penceresinde kullan.
     
-- **🚀 Otomatik başlatma** — İstersen uygulamanın bilgisayar açıldığında otomatik olarak başlamasını sağla.
-    
-- **🔄 Otomatik güncelleme** — Uygulama çalışırken saatte bir yeni sürüm kontrolü yapılır. Güncelleme bulunduğunda kurulum için onay istenir.
-    
-- **🔐 İmzalı güncellemeler** — Güncelleme paketleri kurulmadan önce dijital imza doğrulamasından geçirilir.
-    
-- **⚙️ Merkezi ayarlar** — Sistem tepsisi, otomatik başlatma ve güncelleme tercihlerini yönet; güncellemeleri elle kontrol et.
-    
-- **🌐 Bağlantı kurtarma** — İnternet bağlantısı kesildiğinde çevrimdışı bilgilendirme ekranı gösterilir ve 15 saniyede bir yeniden bağlantı denenir.
-    
-- **🔗 Akıllı bağlantı yönetimi** — Topluyo dışındaki bağlantılar varsayılan tarayıcıda açılır. Normal tıklama, `Ctrl + tıklama` ve orta fare tuşuyla açma desteklenir.
-    
-- **📋 Pano desteği** — Kes, kopyala, yapıştır ve tümünü seç işlemleri için sağ tık menüsü ve klavye kısayolları.
-    
-
-
 ---
 
 ## 📥 Kurulum
@@ -172,3 +150,4 @@ Oluşturulan kurulum paketleri hedef işletim sistemine ve Tauri yapılandırmas
 [Web Sitesi](https://topluyo.com/) · [GitHub Releases](https://github.com/Mirmir0lucky/topluyo-app/releases)
 
 </div>
+*yapay zeka kullanılarak yapıldı. orjinal repositery: https://github.com/topluyo/App*
