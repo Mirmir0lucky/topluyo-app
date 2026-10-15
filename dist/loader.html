@@ -66,7 +66,8 @@
   </style>
 </head>
 <body>
-  <img class="logo" src="logo.gif" alt="Topluyo" onerror="this.remove()" />
+  <img id="logo" class="logo" src="logo.gif" alt="Topluyo" onerror="this.remove()" />
+  <img id="crying" class="logo hidden" src="crying-logo.png" alt="Topluyo" onerror="this.remove()" />
 
   <div id="loading" class="panel row" style="justify-content:center">
     <div class="spinner"></div>
@@ -105,10 +106,15 @@
       ticker = null;
     }
 
+    // Çevrimdışı ve hata durumunda normal logo yerine üzgün logo
     function showOffline() {
       loading.classList.add('hidden');
       offline.classList.remove('hidden');
       retryBtn.disabled = false;
+      const logoEl = document.getElementById('logo');
+      const cryingEl = document.getElementById('crying');
+      if (logoEl) logoEl.classList.add('hidden');
+      if (cryingEl) cryingEl.classList.remove('hidden');
     }
 
     function showCountdown() {
