@@ -264,6 +264,8 @@ const SITE_SCRIPT: &str = r#"
     menu.appendChild(menuItem('Yapıştır', () => go('topluyo-action://paste')));
     menu.appendChild(separator());
     menu.appendChild(menuItem('Tümünü seç', () => document.execCommand('selectAll')));
+    menu.appendChild(separator());
+    menu.appendChild(menuItem('Sayfa bağlantısını kopyala', () => go('topluyo-copy://url?u=' + encodeURIComponent(location.href))));
 
     document.body.appendChild(menu);
 
@@ -607,12 +609,16 @@ fn open_settings(app: &AppHandle) -> tauri::Result<()> {
         w.set_focus()?;
         return Ok(());
     }
-    WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+    let w = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Topluyo Ayarları")
         .inner_size(440.0, 660.0)
         .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
         .center()
         .build()?;
+    // Başlık çubuğu ayarlar sayfasıyla aynı koyu renk (yalnızca Windows)
+    apply_titlebar(&w, true);
     Ok(())
 }
 
@@ -757,6 +763,13 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .on_navigation(move |url| {
             if url.scheme() == "topluyo-action" {
                 handle_action(&nav_app, url.host_str().unwrap_or(""));
+                return false;
+            }
+
+            if url.scheme() == "topluyo-copy" {
+                if let Some((_, text)) = url.query_pairs().find(|(k, _)| k == "u") {
+                    let _ = nav_app.clipboard().write_text(text.to_string());
+                }
                 return false;
             }
 
