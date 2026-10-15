@@ -21,14 +21,22 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "publisher": "Topluyo Community"
+    "publisher": "Topluyo Community",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   },
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2MEQ5QTE5QzU4QjNGODYKUldTR1A0dkZHWm9OVm56QUhUcUZpL0JHSk5UWXVnWno5cStZV2wxNkZMellNU09MUDFCV3VNSEcK",
       "endpoints": [
         "https://github.com/Mirmir0lucky/topluyo-app/releases/latest/download/latest.json"
-      ]
+      ],
+      "windows": {
+        "installMode": "quiet"
+      }
     }
   }
 }

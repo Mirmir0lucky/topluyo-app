@@ -173,7 +173,7 @@
       }
 
       document.getElementById('clear').addEventListener('click', async () => {
-        if (!confirm('Oturum ve önbellek silinecek, Topluyo yeniden başlayacak. Devam edilsin mi?')) return;
+        setStatus('Temizleniyor, Topluyo yeniden başlayacak…');
         try {
           await invoke('clear_site_data');
         } catch (err) {
