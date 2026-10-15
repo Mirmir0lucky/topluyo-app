@@ -11,6 +11,7 @@ use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::{ManagerExt as AutostartExt, MacosLauncher};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -18,12 +19,10 @@ const SITE_HOST: &str = "topluyo.com";
 const SITE_URL: &str = "https://topluyo.com/";
 
 // Giriş sayfaları uygulama içinde açılır (Google girişi için). Diğer dış linkler tarayıcıda açılır.
-const AUTH_HOSTS: &[&str] = &[
-    "accounts.google.com",
-    "appleid.apple.com",
-    "login.microsoftonline.com",
-    "login.live.com",
-];
+const AUTH_HOSTS: &[&str] = &["accounts.google.com"];
+
+// Google girişi sistem tarayıcısında yapılır; site girişten sonra topluyo://auth?token=... ile uygulamaya döner
+const DESKTOP_LOGIN_URL: &str = "https://topluyo.com/?desktop_login=1";
 
 // Sitenin içine eklenen script:
 // - sol alttaki dişli düğmesi (topluyo-action://settings)
@@ -37,7 +36,7 @@ const SITE_SCRIPT: &str = r#"
   if (!location.hostname.endsWith('topluyo.com')) return;
 
   const POSITION = { left: '112px', bottom: '6px' };
-  const AUTH_HOSTS = ['accounts.google.com', 'appleid.apple.com', 'login.microsoftonline.com', 'login.live.com'];
+  const AUTH_HOSTS = ['accounts.google.com'];
 
   function isAuthHost(h) {
     return AUTH_HOSTS.some((a) => h === a || h.endsWith('.' + a));
@@ -292,6 +291,14 @@ const SITE_SCRIPT: &str = r#"
   setInterval(() => { addGear(); applyUpdate(); }, 2000);
   // Sayfa hazır olunca Rust'a haber ver; Rust güncel güncelleme durumunu geri gönderir
   document.addEventListener('DOMContentLoaded', () => go('topluyo-action://ready'));
+  // Sayfa boş ya da ağ hata sayfasıysa uygulamaya haber ver (bağlantı kartına dönülür)
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      const errorPage = !!document.getElementById('main-frame-error') || (!!document.body && document.body.classList.contains('neterror'));
+      const empty = !document.body || document.body.children.length === 0;
+      if (errorPage || empty) go('topluyo-action://page_failed');
+    }, 2500);
+  });
 })();
 "#;
 
@@ -320,6 +327,8 @@ struct AppState {
     pending_update: Mutex<Option<Update>>,
     postponed: Mutex<bool>,
     link: Mutex<String>,
+    pending_auth: Mutex<Option<String>>,
+    last_failure: Mutex<Option<std::time::Instant>>,
 }
 
 // ---------- Başlık çubuğu rengi (yalnızca Windows, DWM) ----------
@@ -593,6 +602,11 @@ async fn site_connected(app: AppHandle) -> Result<(), String> {
         create_main_window(&app).map_err(|e| e.to_string())?;
     }
     set_link_status(&app, "Bağlı");
+    if let Some(target) = app.state::<AppState>().pending_auth.lock().unwrap().take() {
+        if let (Some(w), Ok(u)) = (app.get_webview_window("main"), Url::parse(&target)) {
+            let _ = w.navigate(u);
+        }
+    }
     if let Some(w) = app.get_webview_window("main") {
         let on = app.state::<AppState>().settings.lock().unwrap().title_bar_match;
         apply_titlebar(&w, on);
@@ -654,7 +668,7 @@ fn refresh_tray(app: &AppHandle) {
     }
     if let Some(tray) = app.tray_by_id("main-tray") {
         let _ = tray.set_tooltip(Some(text));
-        let offline = link == "Bağlantı yok" || link == "Site yanıt vermiyor";
+        let offline = link == "Bağlantı yok" || link == "Site yanıt vermiyor" || link == "Site yüklenemedi";
         if let Some(base) = app.default_window_icon() {
             let _ = tray.set_icon(Some(tray_icon_variant(base, offline, pending)));
         }
@@ -715,6 +729,65 @@ fn open_external(app: &AppHandle, url: &Url) {
     }
 }
 
+// Google girişini sistem tarayıcısında açar
+fn open_login(app: &AppHandle) {
+    if let Ok(url) = Url::parse(DESKTOP_LOGIN_URL) {
+        open_external(app, &url);
+    }
+}
+
+// Sayfa açıldı ama yüklenemedi: ana pencereyi kapatıp bağlantı kartına döner.
+// Kart yeniden denediği için bağlantı geri gelince site yeni pencerede açılır.
+fn handle_page_failure(app: &AppHandle) {
+    {
+        let state = app.state::<AppState>();
+        let mut last = state.last_failure.lock().unwrap();
+        if let Some(t) = *last {
+            if t.elapsed() < Duration::from_secs(30) {
+                return;
+            }
+        }
+        *last = Some(std::time::Instant::now());
+    }
+    log::warn!("Sayfa yüklenemedi, bağlantı kartına dönülüyor");
+    set_link_status(app, "Site yüklenemedi");
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.destroy();
+    }
+    let _ = open_connect_window(app);
+}
+
+// ---------- Derin bağlantı (topluyo://) ----------
+
+// topluyo://auth?token=... → siteye giriş jetonunu iletir (site /auth/desktop adresinde karşılar)
+fn handle_deep_link(app: &AppHandle, raw: &str) {
+    let Ok(url) = Url::parse(raw) else {
+        return;
+    };
+    if url.scheme() != "topluyo" || url.host_str() != Some("auth") {
+        return;
+    }
+    let Some((_, token)) = url.query_pairs().find(|(k, _)| k == "token") else {
+        return;
+    };
+    let Ok(mut target) = Url::parse(SITE_URL).and_then(|base| base.join("auth/desktop")) else {
+        return;
+    };
+    target.query_pairs_mut().append_pair("token", &token);
+
+    match app.get_webview_window("main") {
+        Some(w) => {
+            let _ = w.navigate(target);
+            let _ = w.set_focus();
+        }
+        None => {
+            // Ana pencere henüz yoksa bağlantı kurulunca açılışta uygulanır
+            *app.state::<AppState>().pending_auth.lock().unwrap() = Some(target.to_string());
+        }
+    }
+    log::info!("Giriş bağlantısı alındı");
+}
+
 // Sitenin script'inden gelen işlemler. Pencere ve clipboard işi navigasyon olayının dışında yapılır.
 fn handle_action(app: &AppHandle, action: &str) {
     let app = app.clone();
@@ -726,6 +799,9 @@ fn handle_action(app: &AppHandle, action: &str) {
             }
             "check_update" => {
                 check_for_update(app, true).await;
+            }
+            "page_failed" => {
+                handle_page_failure(&app);
             }
             "ready" => {
                 let on = app.state::<AppState>().pending_update.lock().unwrap().is_some();
@@ -776,13 +852,22 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
             if url.scheme() == "topluyo-open" {
                 if let Some((_, target)) = url.query_pairs().find(|(k, _)| k == "u") {
                     if let Ok(target_url) = Url::parse(&target) {
-                        open_external(&nav_app, &target_url);
+                        if is_auth_url(&target_url) {
+                            open_login(&nav_app);
+                        } else {
+                            open_external(&nav_app, &target_url);
+                        }
                     }
                 }
                 return false;
             }
 
-            if is_site_url(&url) || is_local_url(&url) || is_auth_url(&url) {
+            if is_auth_url(&url) {
+                open_login(&nav_app);
+                return false;
+            }
+
+            if is_site_url(&url) || is_local_url(&url) {
                 true
             } else {
                 open_external(&nav_app, &url);
@@ -794,7 +879,11 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
                 handle_action(&new_app, url.host_str().unwrap_or(""));
                 return NewWindowResponse::Deny;
             }
-            if is_site_url(&url) || is_auth_url(&url) {
+            if is_auth_url(&url) {
+                open_login(&new_app);
+                return NewWindowResponse::Deny;
+            }
+            if is_site_url(&url) {
                 NewWindowResponse::Allow
             } else {
                 open_external(&new_app, &url);
@@ -911,6 +1000,15 @@ async fn update_loop(app: AppHandle) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            for arg in argv {
+                if arg.starts_with("topluyo://") {
+                    handle_deep_link(app, &arg);
+                }
+            }
+            show_main(app);
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
@@ -936,6 +1034,12 @@ fn main() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+            let _ = app.deep_link().register("topluyo");
+            for arg in std::env::args() {
+                if arg.starts_with("topluyo://") {
+                    handle_deep_link(&handle, &arg);
+                }
+            }
             if let Ok(cfg) = app.path().app_config_dir() {
                 let marker = cfg.join("clear-site-data");
                 if marker.exists() {
@@ -953,6 +1057,8 @@ fn main() {
                 pending_update: Mutex::new(None),
                 postponed: Mutex::new(false),
                 link: Mutex::new(String::new()),
+                pending_auth: Mutex::new(None),
+                last_failure: Mutex::new(None),
             });
             log::info!("Topluyo {} başlatıldı", handle.package_info().version);
             open_connect_window(&handle)?;
