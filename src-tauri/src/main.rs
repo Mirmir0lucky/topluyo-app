@@ -36,7 +36,7 @@ const SITE_SCRIPT: &str = r#"
 (function () {
   if (!location.hostname.endsWith('topluyo.com')) return;
 
-  const POSITION = { left: '112px', bottom: '8px' };
+  const POSITION = { left: '112px', bottom: '6px' };
   const AUTH_HOSTS = ['accounts.google.com', 'appleid.apple.com', 'login.microsoftonline.com', 'login.live.com'];
 
   function isAuthHost(h) {
@@ -60,24 +60,36 @@ const SITE_SCRIPT: &str = r#"
     b.id = 'topluyo-update';
     b.type = 'button';
     b.title = 'Güncelleme hazır';
-    b.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="M6 11l6 6 6-6"/><path d="M5 20h14"/></svg>';
+    b.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="M6 11l6 6 6-6"/><path d="M5 20h14"/></svg>';
     Object.assign(b.style, {
       position: 'fixed',
-      left: '150px',
-      bottom: '11px',
+      left: '154px',
+      bottom: '8px',
       zIndex: '2147483647',
-      width: '26px',
-      height: '26px',
+      width: '32px',
+      height: '32px',
       padding: '0',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: '#22c55e',
-      color: '#06140b',
-      border: 'none',
+      background: 'transparent',
+      color: '#22c55e',
+      border: '1.5px solid #22c55e',
       borderRadius: '50%',
       cursor: 'pointer',
-      boxShadow: '0 0 0 3px rgba(34,197,94,0.25)'
+      opacity: '0.9',
+      transition: 'background 0.15s, color 0.15s, opacity 0.15s'
+    });
+    // Üzerine gelince dolar, dişli ile aynı hafiflikte durur
+    b.addEventListener('mouseenter', () => {
+      b.style.background = '#22c55e';
+      b.style.color = '#06140b';
+      b.style.opacity = '1';
+    });
+    b.addEventListener('mouseleave', () => {
+      b.style.background = 'transparent';
+      b.style.color = '#22c55e';
+      b.style.opacity = '0.9';
     });
     b.addEventListener('click', (e) => {
       e.preventDefault();
@@ -104,13 +116,13 @@ const SITE_SCRIPT: &str = r#"
       left: POSITION.left,
       bottom: POSITION.bottom,
       zIndex: '2147483647',
-      width: '32px',
-      height: '32px',
+      width: '36px',
+      height: '36px',
       padding: '0',
       background: 'transparent',
       color: '#f2f0f3',
       border: 'none',
-      fontSize: '18px',
+      fontSize: '22px',
       lineHeight: '1',
       cursor: 'pointer',
       opacity: '0.9'
@@ -161,6 +173,9 @@ const SITE_SCRIPT: &str = r#"
   }, true);
 
   // ---------- Kısayollar ----------
+  // Yapıştırma olayını izle: WebView kendi yapıştırmasını yaptıysa (resim dahil) yedeğe gerek yok
+  let pasteSeen = false;
+  document.addEventListener('paste', () => { pasteSeen = true; }, true);
   document.addEventListener('keydown', (e) => {
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     const k = (e.key || '').toLowerCase();
@@ -171,7 +186,9 @@ const SITE_SCRIPT: &str = r#"
     } else if (k === 'a') {
       e.preventDefault(); e.stopPropagation(); document.execCommand('selectAll');
     } else if (k === 'v') {
-      e.preventDefault(); e.stopPropagation(); go('topluyo-action://paste');
+      // Yapıştırmayı WebView'a bırak (resim dahil). Olay gelmezse metni Rust tarafından yapıştır.
+      pasteSeen = false;
+      setTimeout(() => { if (!pasteSeen) go('topluyo-action://paste'); }, 150);
     }
   }, true);
 
