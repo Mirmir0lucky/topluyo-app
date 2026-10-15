@@ -144,7 +144,6 @@ const SITE_SCRIPT: &str = r#"
     try { u = new URL(a.href, location.href); } catch (e) { return null; }
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
     if (u.hostname.endsWith('topluyo.com')) return null;
-    if (isAuthHost(u.hostname)) return null;
     return u.href;
   }
 
@@ -736,6 +735,17 @@ fn open_login(app: &AppHandle) {
     }
 }
 
+// İptal edilen navigasyondan sonra site sayfası boş kalabiliyor; kısa bir gecikmeyle yeniden yükle
+fn reload_main(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.eval("location.reload()");
+        }
+    });
+}
+
 // Sayfa açıldı ama yüklenemedi: ana pencereyi kapatıp bağlantı kartına döner.
 // Kart yeniden denediği için bağlantı geri gelince site yeni pencerede açılır.
 fn handle_page_failure(app: &AppHandle) {
@@ -864,6 +874,7 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
 
             if is_auth_url(&url) {
                 open_login(&nav_app);
+                reload_main(&nav_app);
                 return false;
             }
 
